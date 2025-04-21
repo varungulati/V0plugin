@@ -9,7 +9,12 @@
     <resource-bundle>messages.MyBundle</resource-bundle>
 
     <extensions defaultExtensionNs="com.intellij">
-        <toolWindow factoryClass="com.github.varungulati.v0plugin.toolWindow.MyToolWindowFactory" id="MyToolWindow"/>
+        <toolWindow factoryClass="com.github.varungulati.v0plugin.toolWindow.MyToolWindowFactory"
+                   id="V0 Assistant"
+                   icon="icons/v0Icon.svg"
+                   anchor="right"
+                   secondary="false"
+                   order="first"/>
         <postStartupActivity implementation="com.github.varungulati.v0plugin.startup.MyProjectActivity" />
     </extensions>
 </idea-plugin>
