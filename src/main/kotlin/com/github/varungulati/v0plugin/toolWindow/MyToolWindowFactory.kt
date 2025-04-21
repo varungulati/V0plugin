@@ -34,10 +34,6 @@ import javax.swing.text.html.StyleSheet
 
 class MyToolWindowFactory : ToolWindowFactory {
 
-    init {
-        thisLogger().warn("Don't forget to remove all non-needed sample code files with their corresponding registration entries in `plugin.xml`.")
-    }
-
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
         val myToolWindow = MyToolWindow(toolWindow)
         val content = ContentFactory.getInstance().createContent(myToolWindow.getContent(), null, false)
@@ -48,12 +44,11 @@ class MyToolWindowFactory : ToolWindowFactory {
 
     class MyToolWindow(toolWindow: ToolWindow) {
 
-        private val service = toolWindow.project.service<MyProjectService>()
-        private val authService = toolWindow.project.service<V0AuthService>()
-        private val chatService = toolWindow.project.service<V0ChatService>()
+        private val project = toolWindow.project
+        private val authService = project.service<V0AuthService>()
+        private val chatService = project.service<V0ChatService>()
         private val contentPanel = JPanel(BorderLayout())
         private val mainPanel = JBPanel<JBPanel<*>>()
-        private val statusLabel = JBLabel("")
 
         // Chat UI components
         private val chatHistoryArea = JTextPane()
@@ -64,7 +59,27 @@ class MyToolWindowFactory : ToolWindowFactory {
 
         init {
             setupChatUI()
-            updateUI()
+
+            // Initial UI setup based on login state
+            if (authService.isLoggedIn()) {
+                showChatUI()
+            } else {
+                showLoginUI()
+            }
+
+            // Add a timer to check login state periodically
+            Timer(2000) { _ ->
+                SwingUtilities.invokeLater {
+                    if (authService.isLoggedIn()) {
+                        showChatUI()
+                    } else {
+                        showLoginUI()
+                    }
+                }
+            }.apply {
+                isRepeats = true
+                start()
+            }
         }
 
         private fun setupChatUI() {
@@ -231,8 +246,8 @@ class MyToolWindowFactory : ToolWindowFactory {
                 .replace("<", "&lt;")
                 .replace(">", "&gt;")
 
-            // Process code blocks (```language code ```)
-            val codeBlockRegex = "```([a-zA-Z]*)\\s*([\\s\\S]*?)```".toRegex()
+            // Process code blocks (\`\`\`language code \`\`\`)
+            val codeBlockRegex = """\`\`\`([a-zA-Z]*)\s*([\s\S]*?)\`\`\`""".toRegex()
             processedMessage = processedMessage.replace(codeBlockRegex) { matchResult ->
                 val language = matchResult.groupValues[1]
                 val code = matchResult.groupValues[2].trim()
@@ -241,7 +256,7 @@ class MyToolWindowFactory : ToolWindowFactory {
             }
 
             // Process inline code (`code`)
-            val inlineCodeRegex = "`([^`]+)`".toRegex()
+            val inlineCodeRegex = """`([^`]+)`""".toRegex()
             processedMessage = processedMessage.replace(inlineCodeRegex) { matchResult ->
                 val code = matchResult.groupValues[1]
                 "<code>$code</code>"
@@ -272,15 +287,14 @@ class MyToolWindowFactory : ToolWindowFactory {
             }
         }
 
-        private fun updateUI() {
-            if (authService.isLoggedIn()) {
-                showChatUI()
-            } else {
-                showLoginUI()
-            }
-        }
-
         private fun showLoginUI() {
+            // Check if we're already showing the login UI
+            if (isShowingLoginUI()) {
+                return
+            }
+
+            thisLogger().info("Showing login UI")
+
             contentPanel.removeAll()
 
             // Login panel with prominent login button
@@ -308,9 +322,6 @@ class MyToolWindowFactory : ToolWindowFactory {
                             "V0.dev Login"
                         )
 
-                        // Update status
-                        statusLabel.text = "Opening browser..."
-
                         // Start the login process
                         authService.loginWithBrowser { success ->
                             ApplicationManager.getApplication().invokeLater {
@@ -319,14 +330,12 @@ class MyToolWindowFactory : ToolWindowFactory {
                                         "Successfully logged in to V0.dev!",
                                         "Login Successful"
                                     )
-                                    statusLabel.text = ""
-                                    updateUI()
+                                    showChatUI()
                                 } else {
                                     Messages.showErrorDialog(
                                         "Failed to log in to V0.dev. Please try again.",
                                         "Login Failed"
                                     )
-                                    statusLabel.text = "Login failed. Please try again."
                                 }
                             }
                         }
@@ -346,12 +355,6 @@ class MyToolWindowFactory : ToolWindowFactory {
 
                 add(topPanel, BorderLayout.NORTH)
                 add(buttonPanel, BorderLayout.CENTER)
-
-                // Status label
-                statusLabel.horizontalAlignment = JBLabel.CENTER
-                val statusPanel = JPanel(FlowLayout(FlowLayout.CENTER))
-                statusPanel.add(statusLabel)
-                add(statusPanel, BorderLayout.SOUTH)
             }
 
             contentPanel.add(loginPanel, BorderLayout.CENTER)
@@ -359,7 +362,48 @@ class MyToolWindowFactory : ToolWindowFactory {
             contentPanel.repaint()
         }
 
+        private fun isShowingLoginUI(): Boolean {
+            if (contentPanel.componentCount == 0) return false
+
+            val component = contentPanel.getComponent(0)
+            if (component is JPanel) {
+                // Check if this panel contains a login button
+                for (c in component.components) {
+                    if (c is JPanel) {
+                        for (innerC in c.components) {
+                            if (innerC is JButton && innerC.text == "Login to V0.dev") {
+                                return true
+                            }
+                        }
+                    }
+                }
+            }
+            return false
+        }
+
+        private fun isShowingChatUI(): Boolean {
+            if (contentPanel.componentCount == 0) return false
+
+            val component = contentPanel.getComponent(0)
+            if (component is JPanel) {
+                // Check if this panel contains the chat history area
+                for (c in component.components) {
+                    if (c is JScrollPane && c.viewport.view == chatHistoryArea) {
+                        return true
+                    }
+                }
+            }
+            return false
+        }
+
         private fun showChatUI() {
+            // Check if we're already showing the chat UI
+            if (isShowingChatUI()) {
+                return
+            }
+
+            thisLogger().info("Showing chat UI")
+
             contentPanel.removeAll()
 
             // Chat panel
@@ -377,7 +421,7 @@ class MyToolWindowFactory : ToolWindowFactory {
                     val logoutButton = JButton("Logout").apply {
                         addActionListener {
                             authService.logout()
-                            updateUI()
+                            showLoginUI()
                         }
                     }
 
@@ -417,6 +461,15 @@ class MyToolWindowFactory : ToolWindowFactory {
 
             // Focus on message field
             messageField.requestFocus()
+
+            // Clear existing chat history if it's not empty
+            try {
+                if (htmlDoc.length > 0) {
+                    htmlDoc.remove(0, htmlDoc.length)
+                }
+            } catch (e: Exception) {
+                thisLogger().error("Error clearing chat history", e)
+            }
 
             // Add welcome message
             addMessageToChat("V0", "Hello! I'm V0 Assistant. How can I help you today?", false)
